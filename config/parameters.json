@@ -1,0 +1,110 @@
+{
+  "metadata": {
+    "name": "Combo XNDX MR LO + TSMOM LO sauf CL",
+    "version": "1.0.0",
+    "date_validation": "2026-05-15",
+    "statut": "VALIDEE §8.3"
+  },
+  "allocation": {
+    "mr": 0.5,
+    "tsmom": 0.5,
+    "rebalance": "FIXE_50_50"
+  },
+  "xndx_mr": {
+    "actif": "XNDX",
+    "long_only": true,
+    "z_score": {
+      "phase1_N": 5,
+      "phase1_threshold": 1.0,
+      "phase1_start": "1999-03-04",
+      "phase1_end": "2013-12-31"
+    },
+    "wfo": {
+      "start": "2014-01-01",
+      "is_years": 8,
+      "oos_years": 2,
+      "N_grid": [5, 7, 9, 11, 13, 15],
+      "thr_grid": [0.8, 0.9, 1.0, 1.1, 1.2, 1.3],
+      "criterion": "Sharpe IS"
+    },
+    "time_stop_days": 20,
+    "vol_target": 0.20,
+    "vol_window": 60,
+    "execution": "MOC J+1"
+  },
+  "tsmom": {
+    "panier": ["TLT", "SPXTR", "XNDX", "GLD", "CL"],
+    "long_only_actifs": ["TLT", "SPXTR", "XNDX", "GLD"],
+    "long_short_actifs": ["CL"],
+    "allocation_par_actif": 0.2,
+    "signal": {
+      "momentum_lookback_days": 252,
+      "type": "sign(rendement_252j)"
+    },
+    "rebalance_days": 20,
+    "vol_target": 0.21,
+    "vol_window": 60,
+    "leverage_cap": 2.0,
+    "execution": "MOC J+1"
+  },
+  "execution": {
+    "fees_bps": 3.0,
+    "borrow_cost_short_annual": 0.01,
+    "currency_base": "USD",
+    "currency_user": "EUR",
+    "eur_usd_default": 1.08
+  },
+  "performances_validees": {
+    "periode": "2005-11-17 a 2026-05-13",
+    "sharpe": 1.128,
+    "cagr_pct": 12.32,
+    "maxdd_pct": -15.37,
+    "vol_pct": 11.19,
+    "annees_positives": "19/22 (86%)",
+    "hold_out_2024_2026": {
+      "sharpe": 1.742,
+      "cagr_pct": 21.84,
+      "maxdd_pct": -9.21
+    }
+  },
+  "vehicules": {
+    "etf_cfd": {
+      "capital_min_eur": 10000,
+      "instruments": {
+        "XNDX": "QQQ",
+        "SPXTR": "SPY",
+        "GLD": "GLD",
+        "TLT": "TLT",
+        "CL": "CFD_WTI_IBKR (perpetual rolling, no overnight fee)"
+      }
+    },
+    "futures": {
+      "capital_min_eur": 150000,
+      "instruments": {
+        "XNDX": {"sym": "MNQ", "mult": 2, "margin_usd": 2200},
+        "SPXTR": {"sym": "MES", "mult": 5, "margin_usd": 1600},
+        "GLD": {"sym": "MGC", "mult": 10, "margin_usd": 1100},
+        "TLT": {"sym": "ZN", "mult": 1000, "margin_usd": 2000},
+        "CL": {"sym": "MCL", "mult": 100, "margin_usd": 800}
+      }
+    }
+  },
+  "data_source": {
+    "primary": "EODHD",
+    "api_key_env_var": "EODHD_API_KEY",
+    "api_key_default": "69fdc152a61830.85937256",
+    "tickers": {
+      "XNDX": "XNDX.INDX",
+      "SPXTR": "SPXTR.INDX",
+      "GLD": "GLD.US",
+      "TLT": "TLT.US",
+      "CL": "CL.COMM"
+    }
+  },
+  "live": {
+    "start_date": "2026-05-15",
+    "alert_time_et": "17:00",
+    "alert_time_paris_summer": "23:00",
+    "alert_time_paris_winter": "22:00"
+  }
+}
