@@ -38,7 +38,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from src.strategy import (
