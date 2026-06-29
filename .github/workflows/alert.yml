@@ -21,6 +21,12 @@ jobs:
       - name: Install dependencies
         run: pip install pandas numpy requests yfinance matplotlib
 
+      - name: Download latest data
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
+        run: python download_data.py --refresh-only-recent
+
       - name: Send alert email
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
