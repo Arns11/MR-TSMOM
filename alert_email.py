@@ -14,7 +14,8 @@ CONFIDENTIALITE : l'abonné voit ticker + direction + montant à exécuter,
 mais PAS la logique interne (pas de multiplicateur vol-target, pas de
 z-score, pas de momentum/lookback, pas de "pourquoi ce signal").
 
-EUR/USD — cascade : Yahoo → EODHD → cache (warning > 10j) → 1.08 (alerte).
+Prix actifs — cascade : EODHD → Yahoo → CSV local.
+EUR/USD   — cascade : Yahoo → EODHD → cache (warning > 10j) → 1.08 (alerte).
 
 Variables d'environnement :
   GMAIL_USER, GMAIL_APP_PASS, ALERT_RECIPIENTS, EMAIL_ADMIN,
@@ -29,7 +30,7 @@ import sys
 import json
 import smtplib
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
@@ -59,6 +60,25 @@ SUBSCRIBER_CURRENCY = os.environ.get("SUBSCRIBER_CURRENCY", "EUR").upper()
 CAPITAL_REF           = 10_000
 EURUSD_MAX_CACHE_DAYS = 10
 SMTP_SERVER, SMTP_PORT = "smtp.gmail.com", 587
+FETCH_DAYS_BACK       = 600   # ~2 ans — suffisant pour TSMOM 252j + marge z-score
+
+# Tickers EODHD par défaut (écrasés par cfg["data_source"]["tickers"] si présent)
+_EODHD_TICKERS_DEFAULT = {
+    "XNDX":  "XNDX.INDX",
+    "SPXTR": "SPXTR.INDX",
+    "TLT":   "TLT.US",
+    "GLD":   "GLD.US",
+    "CL":    "USO.US",
+}
+
+# Tickers Yahoo Finance (fallback niveau 2)
+_YAHOO_TICKERS_FALLBACK = {
+    "XNDX":  "^NDX",
+    "SPXTR": "SPY",
+    "TLT":   "TLT",
+    "GLD":   "GLD",
+    "CL":    "USO",
+}
 
 
 # ====================================================================
@@ -119,13 +139,93 @@ def fetch_eur_usd():
 
 
 # ====================================================================
-# PRIX
+# PRIX — cascade EODHD → Yahoo → CSV local
 # ====================================================================
-def load_prices(asset):
-    csv_path = DATA_DIR / f"{asset}.csv"
-    if not csv_path.exists():
+def _fetch_eodhd(eodhd_ticker: str) -> "pd.Series | None":
+    """Fetch prix EOD depuis l'API EODHD."""
+    start = (datetime.utcnow() - timedelta(days=FETCH_DAYS_BACK)).strftime("%Y-%m-%d")
+    url = (
+        f"https://eodhd.com/api/eod/{eodhd_ticker}"
+        f"?api_token={EODHD_API_KEY}&from={start}&fmt=json&order=a"
+    )
+    try:
+        import urllib.request
+        with urllib.request.urlopen(url, timeout=20) as r:
+            data = json.loads(r.read())
+        if not data:
+            return None
+        df = pd.DataFrame(data)
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.set_index("date")
+        # adjusted_close pour ETF (dividendes inclus), close pour indices
+        col = "adjusted_close" if "adjusted_close" in df.columns else "close"
+        s = df[col].dropna().rename("close")
+        if len(s) < 50:
+            return None
+        print(f"  EODHD {eodhd_ticker} ({col}): {len(s)} pts, dernier {s.index[-1].date()}")
+        return s
+    except Exception as e:
+        print(f"  EODHD {eodhd_ticker} echec: {e}")
         return None
-    return pd.read_csv(csv_path, parse_dates=["date"], index_col="date")["close"]
+
+
+def _fetch_yahoo(yahoo_ticker: str) -> "pd.Series | None":
+    """Fetch prix depuis Yahoo Finance."""
+    try:
+        import yfinance as yf
+        start = (datetime.utcnow() - timedelta(days=FETCH_DAYS_BACK)).strftime("%Y-%m-%d")
+        raw = yf.download(yahoo_ticker, start=start, progress=False, auto_adjust=True)
+        if raw.empty:
+            return None
+        s = raw["Close"]
+        if hasattr(s, "columns"):   # MultiIndex (yfinance >= 0.2.40)
+            s = s.iloc[:, 0]
+        s.index = pd.to_datetime(s.index).tz_localize(None)
+        s.index.name = "date"
+        s = s.dropna().rename("close")
+        print(f"  Yahoo {yahoo_ticker}: {len(s)} pts, dernier {s.index[-1].date()}")
+        return s
+    except Exception as e:
+        print(f"  Yahoo {yahoo_ticker} echec: {e}")
+        return None
+
+
+def load_prices(asset: str, cfg=None) -> "pd.Series | None":
+    """
+    Cascade EODHD → Yahoo → CSV local.
+    cfg (optionnel) : si cfg["data_source"]["tickers"][asset] existe, prioritaire
+    sur _EODHD_TICKERS_DEFAULT.
+    """
+    # Ticker EODHD : config d'abord, défaut ensuite
+    eodhd_ticker = None
+    if cfg and "data_source" in cfg and "tickers" in cfg["data_source"]:
+        eodhd_ticker = cfg["data_source"]["tickers"].get(asset)
+    if eodhd_ticker is None:
+        eodhd_ticker = _EODHD_TICKERS_DEFAULT.get(asset)
+
+    yahoo_ticker = _YAHOO_TICKERS_FALLBACK.get(asset)
+
+    # 1. EODHD (primaire)
+    if eodhd_ticker:
+        s = _fetch_eodhd(eodhd_ticker)
+        if s is not None:
+            return s
+
+    # 2. Yahoo (fallback)
+    if yahoo_ticker:
+        print(f"  [{asset}] EODHD KO → Yahoo...")
+        s = _fetch_yahoo(yahoo_ticker)
+        if s is not None:
+            return s
+
+    # 3. CSV local (dernier recours)
+    csv_path = DATA_DIR / f"{asset}.csv"
+    if csv_path.exists():
+        print(f"  [{asset}] Yahoo KO → CSV local...")
+        return pd.read_csv(csv_path, parse_dates=["date"], index_col="date")["close"]
+
+    print(f"  [{asset}] TOUTES SOURCES KO — aucune donnee disponible")
+    return None
 
 
 def is_data_fresh_strict(prices_dict):
@@ -365,7 +465,7 @@ def main():
 
     for attempt in range(max_retries):
         print(f"\n[Tentative {attempt+1}/{max_retries}] Verification fraicheur...")
-        prices_dict = {a: load_prices(a) for a in panier}
+        prices_dict = {a: load_prices(a, cfg) for a in panier}
         is_ok, msg, last_data, expected = is_data_fresh_strict(prices_dict)
 
         if is_ok:

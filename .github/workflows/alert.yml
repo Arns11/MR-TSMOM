@@ -22,9 +22,9 @@ jobs:
         run: pip install pandas numpy requests yfinance matplotlib
 
       - name: Download latest data
+        continue-on-error: true
         env:
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
         run: python download_data.py --refresh-only-recent
 
       - name: Send alert email
