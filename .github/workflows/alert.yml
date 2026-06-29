@@ -1,0 +1,31 @@
+name: Combo Alert
+
+on:
+  schedule:
+    - cron: '0 21 * 3-10 1-5'
+    - cron: '0 22 * 11,12,1,2 1-5'
+  workflow_dispatch:
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pandas numpy requests yfinance matplotlib
+
+      - name: Send alert email
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
+          ALERT_RECIPIENTS: ${{ secrets.ALERT_RECIPIENTS }}
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+          SUBSCRIBER_CURRENCY: ${{ secrets.SUBSCRIBER_CURRENCY }}
+        run: python alert_email.py
