@@ -156,7 +156,7 @@ def is_data_fresh_strict(prices_dict):
 # ====================================================================
 # EMAIL (Gmail SMTP)
 # ====================================================================
-def send_email(subject, body, recipients):
+def send_email(subject, body, recipients, is_html=False):
     if not GMAIL_USER or not GMAIL_APP_PASS:
         print("[WARN: GMAIL_USER / GMAIL_APP_PASS absents, email non envoye]")
         print(f"--- EMAIL ---\nTo: {recipients}\nSubject: {subject}\n\n{body}\n---")
@@ -166,7 +166,7 @@ def send_email(subject, body, recipients):
     msg["Subject"] = subject
     msg["From"]    = GMAIL_USER
     msg["To"]      = ", ".join(recipients) if isinstance(recipients, list) else recipients
-    msg.attach(MIMEText(body, "plain", "utf-8"))
+    msg.attach(MIMEText(body, "html" if is_html else "plain", "utf-8"))
 
     try:
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as srv:
@@ -238,6 +238,20 @@ def fmt_amount(amount_primary, currency_primary, amount_secondary, currency_seco
     return f"{p}{amount_primary:,.0f}  ({s}{amount_secondary:,.0f})"
 
 
+def _badge(direction):
+    colors = {"LONG": "#15803d", "SHORT": "#b91c1c", "CASH": "#64748b"}
+    c = colors.get(direction, "#64748b")
+    return f'<span style="display:inline-block;background:{c};color:#fff;font-size:12px;font-weight:700;padding:2px 10px;border-radius:12px;letter-spacing:.5px;">{direction}</span>'
+
+
+def _expo_html(expo_eur, expo_usd, cur_pri):
+    if cur_pri == "EUR":
+        big, small = f"{expo_eur:,.0f} EUR", f"{expo_usd:,.0f} USD"
+    else:
+        big, small = f"{expo_usd:,.0f} USD", f"{expo_eur:,.0f} EUR"
+    return f'<span style="font-size:15px;font-weight:700;color:#0f172a;">{big}</span> <span style="font-size:12px;color:#94a3b8;">({small})</span>'
+
+
 def generate_signal_message(mr_exp_today, ts_exp_today, today_idx,
                              eur_usd, eurusd_warning,
                              subscriber_currency, capital_ref):
@@ -255,54 +269,78 @@ def generate_signal_message(mr_exp_today, ts_exp_today, today_idx,
 
     cap_p = cap_eur if cur_pri == "EUR" else cap_usd
     cap_s = cap_usd if cur_pri == "EUR" else cap_eur
+    cap_str = f"{cap_p:,.0f} {cur_pri}  ({cap_s:,.0f} {cur_sec})"
 
-    lines = []
-    lines.append(f"COMBO XNDX MR + TSMOM - Signal du {today_idx.strftime('%Y-%m-%d')}")
-    lines.append("=" * 55)
-    lines.append(f"Capital de reference : {fmt_amount(cap_p, cur_pri, cap_s, cur_sec)}")
-    lines.append("")
+    next_bday = (today_idx + pd.tseries.offsets.BDay(1)).date()
 
-    # --- XNDX MR (50% capital) ---
-    lines.append("--- XNDX (50% du capital) ---")
+    # --- POSITION 1 : XNDX MR ---
     if np.isnan(mr_exp_today) or mr_exp_today == 0:
-        lines.append("  CASH (pas en position)")
+        p1_rows = f'<tr><td style="padding:10px 14px;">{_badge("CASH")} &nbsp;XNDX</td><td style="padding:10px 14px;text-align:right;color:#64748b;">Aucune position</td></tr>'
     else:
         expo_usd = alloc_mr_usd * mr_exp_today
         expo_eur = expo_usd / eur_usd
-        expo_str = fmt_amount(expo_eur, "EUR", expo_usd, "USD") if cur_pri == "EUR" else fmt_amount(expo_usd, "USD", expo_eur, "EUR")
-        lines.append("  LONG XNDX")
-        lines.append(f"  Exposition : {expo_str}")
-    lines.append("")
+        p1_rows = f'<tr><td style="padding:10px 14px;">{_badge("LONG")} &nbsp;XNDX</td><td style="padding:10px 14px;text-align:right;">{_expo_html(expo_eur, expo_usd, cur_pri)}</td></tr>'
 
-    # --- TSMOM (50% capital, 10% par actif) ---
-    lines.append("--- TSMOM (50% du capital, 10% par actif) ---")
+    # --- POSITION 2 : TSMOM ---
+    p2_rows = ""
     for asset, exp in ts_exp_today.items():
         if np.isnan(exp) or exp == 0:
-            lines.append(f"  {asset:<8}: CASH")
+            p2_rows += f'<tr><td style="padding:8px 14px;border-top:1px solid #f1f5f9;">{_badge("CASH")} &nbsp;{asset}</td><td style="padding:8px 14px;border-top:1px solid #f1f5f9;text-align:right;color:#64748b;">Aucune position</td></tr>'
         else:
             expo_usd = alloc_per_usd * abs(exp)
             expo_eur = expo_usd / eur_usd
             direction = "LONG" if exp > 0 else "SHORT"
-            expo_str = fmt_amount(expo_eur, "EUR", expo_usd, "USD") if cur_pri == "EUR" else fmt_amount(expo_usd, "USD", expo_eur, "EUR")
-            lines.append(f"  {asset:<8}: {direction:<5}  expo {expo_str}")
-    lines.append("")
+            p2_rows += f'<tr><td style="padding:8px 14px;border-top:1px solid #f1f5f9;">{_badge(direction)} &nbsp;{asset}</td><td style="padding:8px 14px;border-top:1px solid #f1f5f9;text-align:right;">{_expo_html(expo_eur, expo_usd, cur_pri)}</td></tr>'
 
-    next_bday = (today_idx + pd.tseries.offsets.BDay(1)).date()
-
-    lines.append("--- EXECUTION ---")
-    lines.append(f"Dernier signal calcule le : {today_idx.strftime('%Y-%m-%d')} (cloture)")
-    lines.append(f"Ordre a executer le       : {next_bday} a la cloture (MOC)")
-    lines.append("Prochaine verification    : chaque jour ouvre.")
-    lines.append("Vous ne recevrez un nouvel email qu'en cas de changement de position.")
+    warn_html = ""
     if eurusd_warning:
-        lines.append("")
-        lines.append(eurusd_warning)
-    lines.append("")
-    lines.append("---")
-    lines.append("Information fournie a titre d'aide a la decision - ne constitue pas un conseil")
-    lines.append("en investissement personnalise. Vous restez responsable de vos ordres.")
+        warn_html = f'<tr><td style="padding:8px 28px;"><p style="margin:0;color:#92400e;background:#fef3c7;padding:8px 12px;border-radius:6px;font-size:12px;">{eurusd_warning}</p></td></tr>'
 
-    return "\n".join(lines)
+    html = f"""<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 0;"><tr><td align="center">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1);">
+
+  <tr><td style="background:#0f172a;padding:22px 28px;">
+    <p style="margin:0;color:#fff;font-size:18px;font-weight:700;">COMBO XNDX MR + TSMOM</p>
+    <p style="margin:4px 0 0;color:#94a3b8;font-size:13px;">Signal du {today_idx.strftime('%Y-%m-%d')}</p>
+  </td></tr>
+
+  <tr><td style="padding:18px 28px 6px;">
+    <table role="presentation" width="100%" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;"><tr><td style="padding:14px 16px;">
+      <p style="margin:0;color:#1e40af;font-size:14px;font-weight:700;">2 positions a prendre &mdash; chacune = 50% du capital</p>
+      <p style="margin:6px 0 0;color:#475569;font-size:13px;">Capital de reference : <b>{cap_str}</b></p>
+    </td></tr></table>
+  </td></tr>
+
+  <tr><td style="padding:14px 28px 4px;">
+    <p style="margin:0 0 8px;color:#0f172a;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Position 1 &mdash; 50% du capital</p>
+    <table role="presentation" width="100%" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">{p1_rows}</table>
+  </td></tr>
+
+  <tr><td style="padding:14px 28px 4px;">
+    <p style="margin:0 0 8px;color:#0f172a;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Position 2 &mdash; 50% du capital (reparti egalement)</p>
+    <table role="presentation" width="100%" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">{p2_rows}</table>
+  </td></tr>
+
+  <tr><td style="padding:18px 28px 6px;">
+    <table role="presentation" width="100%" style="background:#f8fafc;border-left:4px solid #0f172a;border-radius:0 8px 8px 0;"><tr><td style="padding:14px 16px;">
+      <p style="margin:0 0 8px;color:#0f172a;font-size:13px;font-weight:700;">Execution</p>
+      <table role="presentation" width="100%" style="font-size:13px;color:#475569;">
+        <tr><td style="padding:3px 0;">Dernier signal calcule le</td><td style="padding:3px 0;text-align:right;font-weight:600;color:#0f172a;">{today_idx.strftime('%Y-%m-%d')} (cloture)</td></tr>
+        <tr><td style="padding:3px 0;">Ordre a executer le</td><td style="padding:3px 0;text-align:right;font-weight:600;color:#0f172a;">{next_bday} a la cloture (MOC)</td></tr>
+        <tr><td style="padding:3px 0;">Prochain signal possible le</td><td style="padding:3px 0;text-align:right;font-weight:600;color:#0f172a;">{next_bday} (jour ouvre suivant)</td></tr>
+      </table>
+      <p style="margin:8px 0 0;color:#64748b;font-size:12px;">Le systeme verifie chaque jour ouvre. Vous ne recevrez un nouvel email qu'en cas de changement de position.</p>
+    </td></tr></table>
+  </td></tr>
+  {warn_html}
+
+  <tr><td style="padding:18px 28px 26px;border-top:1px solid #e2e8f0;">
+    <p style="margin:0;color:#94a3b8;font-size:10px;line-height:1.5;">Information fournie a titre d'aide a la decision &mdash; ne constitue pas un conseil en investissement personnalise. Les performances passees ne prejugent pas des performances futures. Vous restez responsable de vos ordres.</p>
+  </td></tr>
+
+</table></td></tr></table></body></html>"""
+    return html
 
 
 # ====================================================================
@@ -362,7 +400,7 @@ def main():
     subject = f"[COMBO] Signal du {today_idx.strftime('%Y-%m-%d')}"
 
     print(f"\n-> Envoi signal ({SUBSCRIBER_CURRENCY}) a {get_recipients()}...")
-    if send_email(subject, body, get_recipients()):
+    if send_email(subject, body, get_recipients(), is_html=True):
         print("OK Signal envoye avec succes")
         sys.exit(0)
     else:
