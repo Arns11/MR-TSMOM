@@ -287,9 +287,13 @@ def generate_signal_message(mr_exp_today, ts_exp_today, today_idx,
             lines.append(f"  {asset:<8}: {direction:<5}  expo {expo_str}")
     lines.append("")
 
+    next_bday = (today_idx + pd.tseries.offsets.BDay(1)).date()
+
     lines.append("--- EXECUTION ---")
-    lines.append("Ordres MOC (Market On Close) le jour suivant.")
-    lines.append("Quantites exactes : voir dashboard live abonne.")
+    lines.append(f"Dernier signal calcule le : {today_idx.strftime('%Y-%m-%d')} (cloture)")
+    lines.append(f"Ordre a executer le       : {next_bday} a la cloture (MOC)")
+    lines.append("Prochaine verification    : chaque jour ouvre.")
+    lines.append("Vous ne recevrez un nouvel email qu'en cas de changement de position.")
     if eurusd_warning:
         lines.append("")
         lines.append(eurusd_warning)
